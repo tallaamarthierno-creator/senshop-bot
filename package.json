@@ -1,4 +1,9 @@
 {
+  "type": "module",
+  "name": "aliexpress-scraper",
+  ...
+}
+{
   "name": "senshop-bot",
   "version": "1.0.0",
   "scripts": {
