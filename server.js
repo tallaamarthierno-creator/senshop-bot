@@ -34,14 +34,30 @@ app.post('/scrape-product', async (req, res) => {
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
     console.log('✅ Page loaded');
 
-    const htmlSnippet = await page.evaluate(() => document.documentElement.outerHTML.substring(0, 1000));
-    console.log('📄 HTML snippet:', htmlSnippet);
-
     const data = await page.evaluate(() => {
-      console.log('🔍 Looking for title...');
-      const title = document.querySelector('h1')?.innerText;
-      console.log('Title found:', title);
-      return { title, price_usd: null, image_url: null };
+      // Titre
+      const name = document.querySelector('h1.pdp-mod-product-title-wrapper h1')?.innerText 
+        || document.querySelector('[data-testid="product-title"]')?.innerText
+        || document.querySelector('h1')?.innerText
+        || null;
+
+      // Prix (en USD)
+      const priceText = document.querySelector('.pdp-price_original_price')?.innerText
+        || document.querySelector('[data-testid="product-price"]')?.innerText
+        || document.querySelector('.product-price-value')?.innerText
+        || document.querySelector('.pdp-price')?.innerText
+        || null;
+      
+      const price_usd = priceText ? parseFloat(priceText.replace(/[^\d.]/g, '')) : null;
+
+      // Image
+      const image_url = document.querySelector('.magnifier-item img')?.src
+        || document.querySelector('img[alt*="product"]')?.src
+        || document.querySelector('img[data-src]')?.getAttribute('data-src')
+        || document.querySelector('.product-image img')?.src
+        || null;
+
+      return { name, price_usd, image_url };
     });
 
     console.log('✅ Data extracted:', data);
@@ -68,12 +84,15 @@ app.post('/place-order', async (req, res) => {
     const page = await browser.newPage();
     await page.goto(aliexpress_url, { waitUntil: 'networkidle2', timeout: 30000 });
 
+    // Ajouter au panier
     await page.click('[data-testid="add-to-cart-button"]', { timeout: 5000 }).catch(() => {});
     await page.waitForTimeout(1000);
 
+    // Aller au panier
     await page.click('[data-testid="cart-icon"]', { timeout: 5000 }).catch(() => {});
     await page.waitForTimeout(2000);
 
+    // Checkout
     await page.click('[data-testid="checkout-button"]', { timeout: 5000 }).catch(() => {});
 
     await browser.close();
