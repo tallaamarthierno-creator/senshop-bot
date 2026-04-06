@@ -12,7 +12,14 @@ app.use(express.json());
 
 // Middleware d'authentification
 app.use((req, res, next) => {
-  const token = req.headers['authorization']?.split(' ')[1];
+  const authHeader = req.headers['authorization'];
+  const token = authHeader?.split(' ')[1];
+  
+  console.log('🔍 Auth header reçu:', authHeader);
+  console.log('🔍 Token extrait:', token);
+  console.log('🔍 Secret attendu:', API_SECRET);
+  console.log('🔍 Correspondent?', token === API_SECRET);
+  
   if (!token || token !== API_SECRET) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
