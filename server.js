@@ -87,18 +87,24 @@ app.post('/scrape-product', async (req, res) => {
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
 
     const data = await page.evaluate(() => {
-      const name = document.querySelector('h1.product-title-text, [class*="product-title"]')?.innerText?.trim() || 
-                   document.querySelector('h1')?.innerText?.trim();
-      
-      const priceEl = document.querySelector('[class*="price--current"] span, .product-price-value, [class*="uniform-banner-box-price"]');
-      const priceText = priceEl?.innerText || priceEl?.textContent || '';
-      const price = parseFloat(priceText.replace(/[^0-9.]/g, '')) || null;
-      
-      const img = document.querySelector('.magnifier-image, [class*="slider-image"] img, .img-view-item img')?.src ||
-                  document.querySelector('img[class*="product"]')?.src;
+  const name = 
+    document.querySelector('[class*="title--wrap"] h1')?.innerText?.trim() ||
+    document.querySelector('h1[class*="title"]')?.innerText?.trim() ||
+    document.querySelector('h1')?.innerText?.trim();
 
-      return { name, price_usd: price, image_url: img };
-    });
+  const priceEl = 
+    document.querySelector('[class*="price--current"]') ||
+    document.querySelector('[class*="product-price"]') ||
+    document.querySelector('[class*="snow-price"]');
+  const priceText = priceEl?.innerText || priceEl?.textContent || '';
+  const price = parseFloat(priceText.replace(/[^0-9.]/g, '')) || null;
+
+  const img = 
+    document.querySelector('[class*="gallery"] img')?.src ||
+    document.querySelector('[class*="slider"] img')?.src ||
+    document.querySelector('img[src*="aliexpress"]')?.src;
+
+  return { name, price_usd: price, image_url: img };
 
     await browser.close();
     res.json({ success: true, ...data });
