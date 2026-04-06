@@ -30,22 +30,25 @@ app.post('/scrape-product', async (req, res) => {
       args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
     const page = await browser.newPage();
+    console.log('📍 Navigating to:', url);
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+    console.log('✅ Page loaded');
+
+    const htmlSnippet = await page.evaluate(() => document.documentElement.outerHTML.substring(0, 1000));
+    console.log('📄 HTML snippet:', htmlSnippet);
 
     const data = await page.evaluate(() => {
-      const title = document.querySelector('h1')?.innerText || document.querySelector('[data-testid="product-title"]')?.innerText;
-      const priceText = document.querySelector('[data-testid="price-now"]')?.innerText || 
-                        document.querySelector('.search-price-main')?.innerText;
-      const price = priceText ? parseFloat(priceText.replace(/[^\d.]/g, '')) : null;
-      const img = document.querySelector('img[src*="aliexpress"]') || document.querySelector('img[alt]');
-      const imageUrl = img ? img.src : null;
-
-      return { title, price_usd: price, image_url: imageUrl };
+      console.log('🔍 Looking for title...');
+      const title = document.querySelector('h1')?.innerText;
+      console.log('Title found:', title);
+      return { title, price_usd: null, image_url: null };
     });
 
+    console.log('✅ Data extracted:', data);
     await browser.close();
     res.json(data);
   } catch (error) {
+    console.error('❌ Error:', error.message);
     if (browser) await browser.close();
     res.status(500).json({ error: error.message });
   }
@@ -65,15 +68,12 @@ app.post('/place-order', async (req, res) => {
     const page = await browser.newPage();
     await page.goto(aliexpress_url, { waitUntil: 'networkidle2', timeout: 30000 });
 
-    // Clique sur le bouton "Ajouter au panier"
     await page.click('[data-testid="add-to-cart-button"]', { timeout: 5000 }).catch(() => {});
     await page.waitForTimeout(1000);
 
-    // Ouvre le panier
     await page.click('[data-testid="cart-icon"]', { timeout: 5000 }).catch(() => {});
     await page.waitForTimeout(2000);
 
-    // Procède au checkout
     await page.click('[data-testid="checkout-button"]', { timeout: 5000 }).catch(() => {});
 
     await browser.close();
