@@ -9,7 +9,7 @@ app.use(express.json());
 
 const ALIEXPRESS_EMAIL = process.env.ALIEXPRESS_EMAIL;
 const ALIEXPRESS_PASSWORD = process.env.ALIEXPRESS_PASSWORD;
-const API_SECRET = process.env.API_SECRET; // clé secrète pour sécuriser les appels
+const API_SECRET = process.env.API_SECRET;
 
 // Middleware de sécurité
 app.use((req, res, next) => {
@@ -69,6 +69,8 @@ app.post('/place-order', async (req, res) => {
 
 // Route santé
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
+
+// Route scraping
 app.post('/scrape-product', async (req, res) => {
   const secret = req.headers['x-api-secret'];
   if (secret !== process.env.API_SECRET) return res.status(401).json({ error: 'Unauthorized' });
@@ -80,31 +82,32 @@ app.post('/scrape-product', async (req, res) => {
   try {
     browser = await puppeteer.launch({ 
       headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
     });
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
 
     const data = await page.evaluate(() => {
-  const name = 
-    document.querySelector('[class*="title--wrap"] h1')?.innerText?.trim() ||
-    document.querySelector('h1[class*="title"]')?.innerText?.trim() ||
-    document.querySelector('h1')?.innerText?.trim();
+      const name = 
+        document.querySelector('[class*="title--wrap"] h1')?.innerText?.trim() ||
+        document.querySelector('h1[class*="title"]')?.innerText?.trim() ||
+        document.querySelector('h1')?.innerText?.trim();
 
-  const priceEl = 
-    document.querySelector('[class*="price--current"]') ||
-    document.querySelector('[class*="product-price"]') ||
-    document.querySelector('[class*="snow-price"]');
-  const priceText = priceEl?.innerText || priceEl?.textContent || '';
-  const price = parseFloat(priceText.replace(/[^0-9.]/g, '')) || null;
+      const priceEl = 
+        document.querySelector('[class*="price--current"]') ||
+        document.querySelector('[class*="product-price"]') ||
+        document.querySelector('[class*="snow-price"]');
+      const priceText = priceEl?.innerText || priceEl?.textContent || '';
+      const price = parseFloat(priceText.replace(/[^0-9.]/g, '')) || null;
 
-  const img = 
-    document.querySelector('[class*="gallery"] img')?.src ||
-    document.querySelector('[class*="slider"] img')?.src ||
-    document.querySelector('img[src*="aliexpress"]')?.src;
+      const img = 
+        document.querySelector('[class*="gallery"] img')?.src ||
+        document.querySelector('[class*="slider"] img')?.src ||
+        document.querySelector('img[src*="aliexpress"]')?.src;
 
-  return { name, price_usd: price, image_url: img };
+      return { name, price_usd: price, image_url: img };
+    });
 
     await browser.close();
     res.json({ success: true, ...data });
@@ -114,6 +117,7 @@ app.post('/scrape-product', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 app.listen(process.env.PORT || 3000, () => {
   console.log('SenShop Bot démarré ✅');
 });
