@@ -69,7 +69,45 @@ app.post('/place-order', async (req, res) => {
 
 // Route santé
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
+app.post('/scrape-product', async (req, res) => {
+  const secret = req.headers['x-api-secret'];
+  if (secret !== process.env.API_SECRET) return res.status(401).json({ error: 'Unauthorized' });
 
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ error: 'URL manquante' });
+
+  let browser;
+  try {
+    browser = await puppeteer.launch({ 
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+
+    const data = await page.evaluate(() => {
+      const name = document.querySelector('h1.product-title-text, [class*="product-title"]')?.innerText?.trim() || 
+                   document.querySelector('h1')?.innerText?.trim();
+      
+      const priceEl = document.querySelector('[class*="price--current"] span, .product-price-value, [class*="uniform-banner-box-price"]');
+      const priceText = priceEl?.innerText || priceEl?.textContent || '';
+      const price = parseFloat(priceText.replace(/[^0-9.]/g, '')) || null;
+      
+      const img = document.querySelector('.magnifier-image, [class*="slider-image"] img, .img-view-item img')?.src ||
+                  document.querySelector('img[class*="product"]')?.src;
+
+      return { name, price_usd: price, image_url: img };
+    });
+
+    await browser.close();
+    res.json({ success: true, ...data });
+
+  } catch (error) {
+    if (browser) await browser.close();
+    res.status(500).json({ error: error.message });
+  }
+});
 app.listen(process.env.PORT || 3000, () => {
   console.log('SenShop Bot démarré ✅');
 });
