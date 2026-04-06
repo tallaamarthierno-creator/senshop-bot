@@ -21,6 +21,9 @@ app.use((req, res, next) => {
 
 // Route de scraping
 app.post('/scrape-product', async (req, res) => {
+  const authHeader = req.headers['authorization'];
+console.log('Auth header reçu:', authHeader);
+console.log('Secret attendu:', API_SECRET);
   try {
     const { url } = req.body;
     if (!url) return res.status(400).json({ error: 'URL manquante' });
