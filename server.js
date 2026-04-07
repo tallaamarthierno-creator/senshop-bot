@@ -1,5 +1,5 @@
-const express = require('express');
-const puppeteer = require('puppeteer');
+import express from 'express';
+import puppeteer from 'puppeteer';
 
 const app = express();
 app.use(express.json());
@@ -53,7 +53,7 @@ app.post('/scrape-product', async (req, res) => {
         }
       } catch(e) {}
 
-      // Fallback DOM simple
+      // Fallback DOM
       const h1 = document.querySelector('h1');
       const img = document.querySelector('.magnifier-image') || document.querySelector('img[src*="aliexpress"]');
       const priceEl = document.querySelector('.product-price-value') || document.querySelector('[class*="price"]');
