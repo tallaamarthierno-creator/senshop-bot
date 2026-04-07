@@ -17,8 +17,14 @@ app.post('/scrape-product', async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'URL manquante' });
 
+  const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY;
+  console.log('SCRAPER_API_KEY présente?', !!SCRAPER_API_KEY);
+  
+  if (!SCRAPER_API_KEY) {
+    return res.status(500).json({ error: 'SCRAPER_API_KEY non configurée' });
+  }
+
   try {
-    const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY;
     const encodedUrl = encodeURIComponent(url);
     const response = await fetch(
       `https://api.scraperapi.com/?api_key=${SCRAPER_API_KEY}&url=${encodedUrl}`
