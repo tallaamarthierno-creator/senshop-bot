@@ -32,6 +32,9 @@ app.post('/scrape-product', async (req, res) => {
     });
 
     const html = await response.text();
+    console.log('STATUS:', response.status);
+console.log('HTML length:', html.length);
+console.log('HTML début:', html.substring(0, 500));
 
     // Extraire window.runParams du HTML brut
     const match = html.match(/window\.runParams\s*=\s*(\{[\s\S]+?\});\s*(?:window|var|let|const|<\/script>)/);
