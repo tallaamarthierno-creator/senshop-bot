@@ -28,25 +28,44 @@ app.use((req, res, next) => {
 
 // Route de scraping
 app.post('/scrape-product', async (req, res) => {
-  const authHeader = req.headers['authorization'];
-console.log('Auth header reçu:', authHeader);
-console.log('Secret attendu:', API_SECRET);
   try {
     const { url } = req.body;
     if (!url) return res.status(400).json({ error: 'URL manquante' });
 
     const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
     const page = await browser.newPage();
+    
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+    await new Promise(r => setTimeout(r, 3000)); // attendre le JS
 
     const data = await page.evaluate(() => {
-      const nameEl = document.querySelector('h1') || document.querySelector('[data-testid*="title"]');
-      const priceEl = document.querySelector('[data-testid*="price"]') || document.querySelector('.search-price-top');
-      const imgEl = document.querySelector('img[alt*="product"]') || document.querySelector('img');
+      // Nom du produit
+      const nameEl = document.querySelector('h1[data-pl="product-title"]')
+        || document.querySelector('.product-title-text')
+        || document.querySelector('h1');
+
+      // Prix
+      const priceEl = document.querySelector('.product-price-value')
+        || document.querySelector('[class*="product-price"]')
+        || document.querySelector('.uniform-banner-box-price');
+
+      let price_usd = null;
+      if (priceEl) {
+        const raw = priceEl.textContent.replace(/[^\d.]/g, '');
+        price_usd = raw ? parseFloat(raw) : null;
+      }
+
+      // Image principale
+      const imgEl = document.querySelector('.magnifier-image')
+        || document.querySelector('img.J_img-base')
+        || document.querySelector('[class*="slider"] img')
+        || document.querySelector('.images-view-item img')
+        || document.querySelector('img');
 
       return {
         name: nameEl?.textContent?.trim() || 'Sans titre',
-        price_usd: priceEl ? parseFloat(priceEl.textContent.replace(/[^\d.]/g, '')) : null,
+        price_usd,
         image_url: imgEl?.src || null
       };
     });
@@ -67,7 +86,6 @@ app.post('/place-order', async (req, res) => {
     const page = await browser.newPage();
     await page.goto(aliexpress_url, { waitUntil: 'networkidle2', timeout: 30000 });
 
-    // Simulation d'ajout au panier et commande
     await page.click('[data-testid="quantity-input"]').catch(() => {});
     await page.type('[data-testid="quantity-input"]', String(quantity)).catch(() => {});
     
