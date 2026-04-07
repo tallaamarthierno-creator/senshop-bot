@@ -66,16 +66,33 @@ app.post('/scrape-product', async (req, res) => {
 
       // Méthode 3 : DOM fallback
       const h1 = document.querySelector('h1');
-      const img = document.querySelector('img[src*="alicdn"]');
-      const priceEl = document.querySelector('[class*="price--current"]')
-                   || document.querySelector('[class*="product-price"]')
-                   || document.querySelector('[data-pl="product-price"]');
+ const img = document.querySelector('img[src*="alicdn"]');
 
-      return {
-        name: ogTitle || h1?.textContent?.trim() || null,
-        price_usd: priceEl ? parseFloat(priceEl.textContent.replace(/[^\d.]/g, '')) || null : null,
-        image_url: ogImage || img?.src || null
-      };
+ const priceSelectors = [
+   '[class*="price--current"]',
+   '[class*="uniform-banner-box-price"]',
+   '[class*="product-price-value"]',
+   '[class*="manhattan--price-sale"]',
+   '[class*="price-sale"]',
+   'span[data-role="sale-price"]',
+   '.product-price-current',
+   '[class*="SnowPrice"]',
+ ];
+
+ let priceEl = null;
+ for (const sel of priceSelectors) {
+   const el = document.querySelector(sel);
+   if (el && el.textContent.match(/\d/)) {
+     priceEl = el;
+     break;
+   }
+ }
+
+ return {
+   name: ogTitle || h1?.textContent?.trim() || null,
+   price_usd: priceEl ? parseFloat(priceEl.textContent.replace(/[^\d.]/g, '')) || null : null,
+   image_url: ogImage || img?.src || null
+ };
     });
 
     await browser.close();
