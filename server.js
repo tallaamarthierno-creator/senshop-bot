@@ -18,19 +18,34 @@ app.post('/scrape-product', async (req, res) => {
   if (!url) return res.status(400).json({ error: 'URL manquante' });
 
   try {
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Cache-Control': 'max-age=0',
-        'TE': 'trailers',
-      }
-    });
+    const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY;
+    const encodedUrl = encodeURIComponent(url);
+    const response = await fetch(
+      `https://api.scraperapi.com/?api_key=${SCRAPER_API_KEY}&url=${encodedUrl}`
+    );
+    const html = await response.text();
 
+    console.log('STATUS:', response.status);
+    console.log('HTML length:', html.length);
+
+    // Extraire le nom
+    const nameMatch = html.match(/<h1[^>]*>([^<]+)<\/h1>/i)
+      || html.match(/"subject":"([^"]+)"/);
+    const name = nameMatch?.[1]?.trim() || null;
+
+    // Extraire le prix
+    const priceMatch = html.match(/"minAmount":\{"value":(\d+\.?\d*)/);
+    const price_usd = priceMatch ? parseFloat(priceMatch[1]) : null;
+
+    // Extraire l'image
+    const imgMatch = html.match(/<meta property="og:image" content="([^"]+)"/i);
+    const image_url = imgMatch?.[1] || null;
+
+    res.json({ name, price_usd, image_url });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
     const html = await response.text();
     console.log('STATUS:', response.status);
 console.log('HTML length:', html.length);
