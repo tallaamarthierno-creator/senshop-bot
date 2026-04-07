@@ -32,9 +32,18 @@ app.post('/scrape-product', async (req, res) => {
     await page.setViewport({ width: 1366, height: 768 });
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 });
-    await new Promise(r => setTimeout(r, 8000));
+    //await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 });
+    //await new Promise(r => setTimeout(r, 8000));
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+await new Promise(r => setTimeout(r, 12000));
 
+// Vérifier si on est bloqué
+const isBlocked = await page.evaluate(() => {
+  return document.title.includes('captcha') || 
+         document.body.innerHTML.includes('robot') ||
+         document.body.innerHTML.includes('verify');
+});
+if (isBlocked) throw new Error('AliExpress CAPTCHA détecté');
     const data = await page.evaluate(() => {
       // Méthode 1 : window.runParams
       try {
