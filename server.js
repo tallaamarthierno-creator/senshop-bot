@@ -4,7 +4,7 @@ import puppeteer from 'puppeteer';
 const app = express();
 app.use(express.json());
 
-const API_SECRET = process.env.API_SECRET;
+const API_SECRET = process.env.RAILWAY_API_SECRET;
 
 app.use((req, res, next) => {
   const auth = req.headers['authorization'];
