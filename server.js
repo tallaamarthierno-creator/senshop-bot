@@ -1,8 +1,4 @@
 import express from 'express';
-import puppeteerExtra from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-
-puppeteerExtra.use(StealthPlugin());
 
 const app = express();
 app.use(express.json());
@@ -21,93 +17,51 @@ app.post('/scrape-product', async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'URL manquante' });
 
-  let browser;
   try {
-    browser = await puppeteerExtra.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled']
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Cache-Control': 'max-age=0',
+        'TE': 'trailers',
+      }
     });
 
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1366, height: 768 });
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    const html = await response.text();
 
-    //await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 });
-    //await new Promise(r => setTimeout(r, 8000));
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-await new Promise(r => setTimeout(r, 12000));
+    // Extraire window.runParams du HTML brut
+    const match = html.match(/window\.runParams\s*=\s*(\{[\s\S]+?\});\s*(?:window|var|let|const|<\/script>)/);
+    if (match) {
+      const json = JSON.parse(match[1]);
+      const d = json?.data;
+      const title = d?.titleModule?.subject;
+      const price = d?.priceModule?.minAmount?.value || d?.priceModule?.minPrice?.value;
+      const images = d?.imageModule?.imagePathList;
 
-// Vérifier si on est bloqué
-const isBlocked = await page.evaluate(() => {
-  return document.title.includes('captcha') || 
-         document.body.innerHTML.includes('robot') ||
-         document.body.innerHTML.includes('verify');
-});
-if (isBlocked) throw new Error('AliExpress CAPTCHA détecté');
-    const data = await page.evaluate(() => {
-      // Méthode 1 : window.runParams
-      try {
-        const scripts = Array.from(document.querySelectorAll('script'));
-        for (const s of scripts) {
-          const text = s.textContent;
-          if (text.includes('window.runParams')) {
-            const match = text.match(/window\.runParams\s*=\s*(\{[\s\S]+?\});/);
-            if (match) {
-              const json = JSON.parse(match[1]);
-              const d = json?.data;
-              const title = d?.titleModule?.subject;
-              const price = d?.priceModule?.minAmount?.value
-                         || d?.priceModule?.minPrice?.value;
-              const images = d?.imageModule?.imagePathList;
-              if (title) return {
-                name: title,
-                price_usd: price ? parseFloat(String(price).replace(/[^\d.]/g, '')) || null : null,
-                image_url: images?.[0] ? `https:${images[0]}` : null
-              };
-            }
-          }
-        }
-      } catch(e) {}
+      if (title) {
+        return res.json({
+          name: title,
+          price_usd: price ? parseFloat(String(price).replace(/[^\d.]/g, '')) || null : null,
+          image_url: images?.[0] ? `https:${images[0]}` : null
+        });
+      }
+    }
 
-      // Méthode 2 : meta tags
-      const ogTitle = document.querySelector('meta[property="og:title"]')?.content;
-      const ogImage = document.querySelector('meta[property="og:image"]')?.content;
+    // Fallback: meta tags dans le HTML brut
+    const ogTitle = html.match(/<meta property="og:title" content="([^"]+)"/)?.[1];
+    const ogImage = html.match(/<meta property="og:image" content="([^"]+)"/)?.[1];
 
-      // Méthode 3 : DOM fallback
-      const h1 = document.querySelector('h1');
- const img = document.querySelector('img[src*="alicdn"]');
-
- const priceSelectors = [
-   '[class*="price--current"]',
-   '[class*="uniform-banner-box-price"]',
-   '[class*="product-price-value"]',
-   '[class*="manhattan--price-sale"]',
-   '[class*="price-sale"]',
-   'span[data-role="sale-price"]',
-   '.product-price-current',
-   '[class*="SnowPrice"]',
- ];
-
- let priceEl = null;
- for (const sel of priceSelectors) {
-   const el = document.querySelector(sel);
-   if (el && el.textContent.match(/\d/)) {
-     priceEl = el;
-     break;
-   }
- }
-
- return {
-   name: ogTitle || h1?.textContent?.trim() || null,
-   price_usd: priceEl ? parseFloat(priceEl.textContent.replace(/[^\d.]/g, '')) || null : null,
-   image_url: ogImage || img?.src || null
- };
+    res.json({
+      name: ogTitle || null,
+      price_usd: null,
+      image_url: ogImage || null
     });
 
-    await browser.close();
-    res.json(data);
   } catch (error) {
-    if (browser) await browser.close().catch(() => {});
     res.status(500).json({ error: error.message });
   }
 });
