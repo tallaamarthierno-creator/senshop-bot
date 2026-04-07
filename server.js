@@ -1,5 +1,8 @@
 import express from 'express';
-import puppeteer from 'puppeteer';
+import puppeteerExtra from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+
+puppeteerExtra.use(StealthPlugin());
 
 const app = express();
 app.use(express.json());
@@ -20,79 +23,58 @@ app.post('/scrape-product', async (req, res) => {
 
   let browser;
   try {
-    browser = await puppeteer.launch({
+    browser = await puppeteerExtra.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled']
     });
 
     const page = await browser.newPage();
+    await page.setViewport({ width: 1366, height: 768 });
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await new Promise(r => setTimeout(r, 6000));
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 });
+    await new Promise(r => setTimeout(r, 8000));
 
     const data = await page.evaluate(() => {
-      // Méthode 1 : window.runParams avec regex flexible
+      // Méthode 1 : window.runParams
       try {
         const scripts = Array.from(document.querySelectorAll('script'));
         for (const s of scripts) {
           const text = s.textContent;
           if (text.includes('window.runParams')) {
-            // Regex plus flexible sans \n final
             const match = text.match(/window\.runParams\s*=\s*(\{[\s\S]+?\});/);
             if (match) {
               const json = JSON.parse(match[1]);
               const d = json?.data;
               const title = d?.titleModule?.subject;
               const price = d?.priceModule?.minAmount?.value
-                         || d?.priceModule?.minPrice?.value
-                         || d?.priceModule?.formatedActivityPrice
-                         || d?.priceModule?.formatedPrice;
+                         || d?.priceModule?.minPrice?.value;
               const images = d?.imageModule?.imagePathList;
-              if (title) {
-                return {
-                  name: title,
-                  price_usd: price ? parseFloat(String(price).replace(/[^\d.]/g, '')) || null : null,
-                  image_url: images?.[0] ? `https:${images[0]}` : null
-                };
-              }
+              if (title) return {
+                name: title,
+                price_usd: price ? parseFloat(String(price).replace(/[^\d.]/g, '')) || null : null,
+                image_url: images?.[0] ? `https:${images[0]}` : null
+              };
             }
           }
         }
       } catch(e) {}
 
-      // Méthode 2 : __NEXT_DATA__ ou données JSON inline
-      try {
-        const nextData = document.getElementById('__NEXT_DATA__');
-        if (nextData) {
-          const json = JSON.parse(nextData.textContent);
-          const props = json?.props?.pageProps;
-          const title = props?.title || props?.productInfo?.title;
-          const price = props?.price || props?.productInfo?.price;
-          if (title) {
-            return {
-              name: title,
-              price_usd: price ? parseFloat(String(price).replace(/[^\d.]/g, '')) || null : null,
-              image_url: null
-            };
-          }
-        }
-      } catch(e) {}
+      // Méthode 2 : meta tags
+      const ogTitle = document.querySelector('meta[property="og:title"]')?.content;
+      const ogImage = document.querySelector('meta[property="og:image"]')?.content;
 
-      // Méthode 3 : Fallback DOM
+      // Méthode 3 : DOM fallback
       const h1 = document.querySelector('h1');
-      const img = document.querySelector('.magnifier-image')
-               || document.querySelector('img[src*="ae01.alicdn"]')
-               || document.querySelector('img[src*="aliexpress"]');
-      const priceEl = document.querySelector('.product-price-value')
-                   || document.querySelector('[class*="uniform-banner-box-price"]')
-                   || document.querySelector('[class*="price--current"]')
+      const img = document.querySelector('img[src*="alicdn"]');
+      const priceEl = document.querySelector('[class*="price--current"]')
+                   || document.querySelector('[class*="product-price"]')
                    || document.querySelector('[data-pl="product-price"]');
 
       return {
-        name: h1?.textContent?.trim() || null,
+        name: ogTitle || h1?.textContent?.trim() || null,
         price_usd: priceEl ? parseFloat(priceEl.textContent.replace(/[^\d.]/g, '')) || null : null,
-        image_url: img?.src || null
+        image_url: ogImage || img?.src || null
       };
     });
 
@@ -103,3 +85,6 @@ app.post('/scrape-product', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Serveur démarré sur le port ${PORT}`));
