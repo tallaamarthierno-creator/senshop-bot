@@ -61,7 +61,7 @@ app.post('/place-order', async (req, res) => {
     return res.status(400).json({ error: 'aliexpress_url et shipping_address requis' });
   }
 
-  const ALIEXPRESS_MAIL = process.env.ALIEXPRESS_MAIL;
+  const ALIEXPRESS_MAIL = process.env.ALI_MAIL;
   const ALIEXPRESS_PASSWORD = process.env.ALIEXPRESS_PASSWORD;
   const TWOCAPTCHA_API_KEY = process.env.TWOCAPTCHA_API_KEY;
 
