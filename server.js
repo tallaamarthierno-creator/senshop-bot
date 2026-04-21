@@ -13,6 +13,14 @@ app.use((req, res, next) => {
   }
   next();
 });
+//route de test navigateur
+app.get('/debug-env', (req, res) => {
+  res.json({
+    ALIEXPRESS_MAIL: !!process.env.ALIEXPRESS_MAIL,
+    ALIEXPRESS_PASSWORD: !!process.env.ALIEXPRESS_PASSWORD,
+    RAILWAY_API_SECRET: !!process.env.RAILWAY_API_SECRET
+  });
+});
 
 // Route existante — scraping produit
 app.post('/scrape-product', async (req, res) => {
