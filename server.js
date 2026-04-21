@@ -12,7 +12,7 @@ app.get('/debug-env', (req, res) => {
     ALIEXPRESS_MAIL: !!process.env.ALI_MAIL,
     ALIEXPRESS_PASSWORD: !!process.env.ALIEXPRESS_PASSWORD,
     RAILWAY_API_SECRET: !!process.env.RAILWAY_API_SECRET,
-    MAIL_PREVIEW: (process.env.ALIEXPRESS_MAIL || '').substring(0, 10),
+    MAIL_PREVIEW: (process.env.ALI_MAIL || '').substring(0, 10),
     SECRET_PREVIEW: (process.env.RAILWAY_API_SECRET || '').substring(0, 5),
   });
 });
