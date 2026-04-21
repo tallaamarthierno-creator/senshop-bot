@@ -9,7 +9,7 @@ const API_SECRET = process.env.RAILWAY_API_SECRET;
 // Route de debug AVANT le middleware d'auth
 app.get('/debug-env', (req, res) => {
   res.json({
-    ALIEXPRESS_MAIL: !!process.env.ALIEXPRESS_MAIL,
+    ALIEXPRESS_MAIL: !!process.env.ALI_MAIL,
     ALIEXPRESS_PASSWORD: !!process.env.ALIEXPRESS_PASSWORD,
     RAILWAY_API_SECRET: !!process.env.RAILWAY_API_SECRET,
     MAIL_PREVIEW: (process.env.ALIEXPRESS_MAIL || '').substring(0, 10),
