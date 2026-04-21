@@ -6,20 +6,23 @@ app.use(express.json());
 
 const API_SECRET = process.env.RAILWAY_API_SECRET;
 
+// Route de debug AVANT le middleware d'auth
+app.get('/debug-env', (req, res) => {
+  res.json({
+    ALIEXPRESS_MAIL: !!process.env.ALIEXPRESS_MAIL,
+    ALIEXPRESS_PASSWORD: !!process.env.ALIEXPRESS_PASSWORD,
+    RAILWAY_API_SECRET: !!process.env.RAILWAY_API_SECRET,
+    MAIL_PREVIEW: (process.env.ALIEXPRESS_MAIL || '').substring(0, 10),
+    SECRET_PREVIEW: (process.env.RAILWAY_API_SECRET || '').substring(0, 5),
+  });
+});
+
 app.use((req, res, next) => {
   const auth = req.headers['authorization'];
   if (!auth || auth !== `Bearer ${API_SECRET}`) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   next();
-});
-//route de test navigateur
-app.get('/debug-env', (req, res) => {
-  res.json({
-    ALIEXPRESS_MAIL: !!process.env.ALIEXPRESS_MAIL,
-    ALIEXPRESS_PASSWORD: !!process.env.ALIEXPRESS_PASSWORD,
-    RAILWAY_API_SECRET: !!process.env.RAILWAY_API_SECRET
-  });
 });
 
 // Route existante — scraping produit
