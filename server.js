@@ -55,15 +55,15 @@ app.post('/scrape-product', async (req, res) => {
 
 // Nouvelle route — passer une commande AliExpress automatiquement
 app.post('/place-order', async (req, res) => {
-  const { aliexpress_url, quantity, shipping_address, order_id } = req.body;
+  const { aliexpress_url, quantity, shipping_address, order_id, ali_mail, ali_password } = req.body;
 
   if (!aliexpress_url || !shipping_address) {
     return res.status(400).json({ error: 'aliexpress_url et shipping_address requis' });
   }
 
-  const ALIEXPRESS_MAIL = process.env.ALI_MAIL;
-  const ALIEXPRESS_PASSWORD = process.env.ALIEXPRESS_PASSWORD;
-  const TWOCAPTCHA_API_KEY = process.env.TWOCAPTCHA_API_KEY;
+  // Priorité : credentials envoyés dans le body, sinon variables d'env
+  const ALIEXPRESS_MAIL = ali_mail || process.env.ALI_MAIL;
+  const ALIEXPRESS_PASSWORD = ali_password || process.env.ALIEXPRESS_PASSWORD;
 
   if (!ALIEXPRESS_MAIL || !ALIEXPRESS_PASSWORD) {
     return res.status(500).json({ error: 'Identifiants AliExpress non configurés' });
@@ -84,36 +84,55 @@ app.post('/place-order', async (req, res) => {
 
     const page = await context.newPage();
 
-    // 1. Connexion AliExpress
-    console.log('[place-order] Connexion AliExpress...');
-    await page.goto('https://login.aliexpress.com/', { waitUntil: 'networkidle', timeout: 30000 });
+    // 1. Aller sur aliexpress.com d'abord pour les cookies
+    console.log('[place-order] Chargement page accueil...');
+    await page.goto('https://www.aliexpress.com', { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(2000);
 
+    // Fermer popup cookie si présent
+    try {
+      await page.click('button[data-role="accept"], .btn-accept, #gdpr-new-container button', { timeout: 3000 });
+    } catch {}
+
+    // 2. Connexion AliExpress
+    console.log('[place-order] Navigation vers login...');
+    await page.goto('https://login.aliexpress.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForTimeout(3000);
+
+    console.log('[place-order] URL login:', page.url());
+
+    // Attendre le champ email avec timeout long
+    const emailSelector = 'input[name="loginId"], input[type="email"], #fm-login-id, input[placeholder*="mail"], input[placeholder*="Email"], input[placeholder*="email"]';
+    await page.waitForSelector(emailSelector, { timeout: 60000 });
+
     // Remplir email
-    await page.fill('input[name="loginId"], input[type="email"], #fm-login-id', ALIEXPRESS_MAIL);
-    await page.waitForTimeout(500);
+    await page.fill(emailSelector, ALIEXPRESS_MAIL);
+    await page.waitForTimeout(800);
 
     // Remplir mot de passe
-    await page.fill('input[name="password"], input[type="password"], #fm-login-password', ALIEXPRESS_PASSWORD);
-    await page.waitForTimeout(500);
+    const passSelector = 'input[name="password"], input[type="password"], #fm-login-password';
+    await page.waitForSelector(passSelector, { timeout: 10000 });
+    await page.fill(passSelector, ALIEXPRESS_PASSWORD);
+    await page.waitForTimeout(800);
 
     // Cliquer connexion
-    await page.click('button[type="submit"], .login-submit, #fm-login-submit');
-    await page.waitForTimeout(4000);
+    const submitSelector = 'button[type="submit"], .login-submit, #fm-login-submit, button:has-text("Sign in"), button:has-text("Connexion")';
+    await page.click(submitSelector);
+    await page.waitForTimeout(5000);
 
     console.log('[place-order] URL après login:', page.url());
 
-    // 2. Aller sur la page produit
+    // 3. Aller sur la page produit
     console.log('[place-order] Navigation vers le produit...');
-    await page.goto(aliexpress_url, { waitUntil: 'networkidle', timeout: 30000 });
-    await page.waitForTimeout(3000);
+    await page.goto(aliexpress_url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForTimeout(4000);
 
-    // 3. Sélectionner la quantité si > 1
+    // 4. Sélectionner la quantité si > 1
     if (quantity && quantity > 1) {
       try {
         const qtyInput = await page.$('input[class*="quantity"], input[data-role="quantity"]');
         if (qtyInput) {
-          await qtyInput.triple_click();
+          await qtyInput.click({ clickCount: 3 });
           await qtyInput.type(String(quantity));
         }
       } catch (e) {
@@ -121,7 +140,7 @@ app.post('/place-order', async (req, res) => {
       }
     }
 
-    // 4. Cliquer sur "Acheter maintenant" / "Buy Now"
+    // 5. Cliquer sur "Acheter maintenant" / "Buy Now"
     await page.waitForTimeout(2000);
     const buyNowSelectors = [
       'button:has-text("Buy Now")',
@@ -144,22 +163,18 @@ app.post('/place-order', async (req, res) => {
       } catch (e) {}
     }
 
-    if (!clicked) {
-      throw new Error('Bouton Buy Now introuvable');
-    }
+    if (!clicked) throw new Error('Bouton Buy Now introuvable');
 
-    await page.waitForTimeout(4000);
+    await page.waitForTimeout(5000);
     console.log('[place-order] URL après Buy Now:', page.url());
 
-    // 5. Page de confirmation de commande (order confirmation)
-    // Vérifier si on est sur la page de checkout
+    // 6. Vérifier si on est sur la page de checkout
     const currentUrl = page.url();
     if (!currentUrl.includes('trade') && !currentUrl.includes('order') && !currentUrl.includes('checkout')) {
       throw new Error(`Redirection inattendue: ${currentUrl}`);
     }
 
-    // 6. Vérifier/remplir l'adresse de livraison
-    console.log('[place-order] Vérification adresse...');
+    // 7. Vérifier/logger l'adresse de livraison
     try {
       const addressField = await page.$('[class*="address"], [class*="shipping"]');
       if (addressField) {
@@ -168,7 +183,7 @@ app.post('/place-order', async (req, res) => {
       }
     } catch (e) {}
 
-    // 7. Confirmer la commande
+    // 8. Confirmer la commande
     await page.waitForTimeout(2000);
     const confirmSelectors = [
       'button:has-text("Place Order")',
@@ -196,13 +211,12 @@ app.post('/place-order', async (req, res) => {
     const finalUrl = page.url();
     console.log('[place-order] URL finale:', finalUrl);
 
-    // 8. Extraire l'ID de commande AliExpress
+    // 9. Extraire l'ID de commande AliExpress
     let aliexpress_order_id = null;
     const orderIdMatch = finalUrl.match(/orderId=(\d+)/) || finalUrl.match(/order\/(\d+)/);
     if (orderIdMatch) aliexpress_order_id = orderIdMatch[1];
 
     if (!aliexpress_order_id) {
-      // Essayer de l'extraire de la page
       try {
         const pageContent = await page.content();
         const contentMatch = pageContent.match(/"orderId":"?(\d+)"?/);
