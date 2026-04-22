@@ -53,6 +53,26 @@ app.post('/scrape-product', async (req, res) => {
   }
 });
 
+// Helper — trouver un champ dans la page OU dans les iframes
+async function findInPageOrFrames(page, selector, timeout = 15000) {
+  // Essayer dans la page principale
+  try {
+    await page.waitForSelector(selector, { timeout: 5000 });
+    return { frame: page, found: true };
+  } catch {}
+
+  // Essayer dans tous les iframes
+  const frames = page.frames();
+  for (const frame of frames) {
+    try {
+      await frame.waitForSelector(selector, { timeout: 3000 });
+      return { frame, found: true };
+    } catch {}
+  }
+
+  return { frame: null, found: false };
+}
+
 // Nouvelle route — passer une commande AliExpress automatiquement
 app.post('/place-order', async (req, res) => {
   const { aliexpress_url, quantity, shipping_address, order_id, ali_mail, ali_password } = req.body;
@@ -61,7 +81,6 @@ app.post('/place-order', async (req, res) => {
     return res.status(400).json({ error: 'aliexpress_url et shipping_address requis' });
   }
 
-  // Priorité : credentials envoyés dans le body, sinon variables d'env
   const ALIEXPRESS_MAIL = ali_mail || process.env.ALI_MAIL;
   const ALIEXPRESS_PASSWORD = ali_password || process.env.ALIEXPRESS_PASSWORD;
 
@@ -78,56 +97,122 @@ app.post('/place-order', async (req, res) => {
 
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      locale: 'fr-FR',
+      locale: 'en-US',
       viewport: { width: 1280, height: 800 }
     });
 
     const page = await context.newPage();
 
-    // 1. Aller sur aliexpress.com d'abord pour les cookies
+    // 1. Aller sur aliexpress.com pour les cookies
     console.log('[place-order] Chargement page accueil...');
     await page.goto('https://www.aliexpress.com', { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(2000);
 
     // Fermer popup cookie si présent
     try {
-      await page.click('button[data-role="accept"], .btn-accept, #gdpr-new-container button', { timeout: 3000 });
+      await page.click('button[data-role="accept"], .btn-accept', { timeout: 3000 });
     } catch {}
 
-    // 2. Connexion AliExpress
+    // 2. Aller sur la page de login
     console.log('[place-order] Navigation vers login...');
     await page.goto('https://login.aliexpress.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForTimeout(3000);
-
+    await page.waitForTimeout(4000);
     console.log('[place-order] URL login:', page.url());
+    console.log('[place-order] Frames disponibles:', page.frames().map(f => f.url()));
 
-    // Attendre le champ email avec timeout long
-    const emailSelector = 'input[name="loginId"], input[type="email"], #fm-login-id, input[placeholder*="mail"], input[placeholder*="Email"], input[placeholder*="email"]';
-    await page.waitForSelector(emailSelector, { timeout: 60000 });
+    // 3. Chercher les champs dans la page et les iframes
+    const emailSelectors = [
+      'input[name="loginId"]',
+      'input[type="email"]',
+      '#fm-login-id',
+      'input[placeholder*="mail"]',
+      'input[placeholder*="Email"]',
+      'input[placeholder*="phone"]',
+    ];
 
-    // Remplir email
-    await page.fill(emailSelector, ALIEXPRESS_MAIL);
+    let loginFrame = null;
+
+    // Chercher dans chaque iframe
+    const frames = page.frames();
+    console.log('[place-order] Nombre de frames:', frames.length);
+
+    for (const frame of frames) {
+      console.log('[place-order] Test frame:', frame.url());
+      for (const sel of emailSelectors) {
+        try {
+          const el = await frame.$(sel);
+          if (el) {
+            console.log('[place-order] Champ email trouvé dans frame:', frame.url(), 'sélecteur:', sel);
+            loginFrame = frame;
+            break;
+          }
+        } catch {}
+      }
+      if (loginFrame) break;
+    }
+
+    if (!loginFrame) {
+      // Screenshot pour debug
+      const screenshot = await page.screenshot({ encoding: 'base64' });
+      console.log('[place-order] SCREENSHOT BASE64 (premiers 200 chars):', screenshot.substring(0, 200));
+      throw new Error('Champ email introuvable dans aucun frame. Voir logs pour debug.');
+    }
+
+    // 4. Remplir email
+    for (const sel of emailSelectors) {
+      try {
+        const el = await loginFrame.$(sel);
+        if (el) {
+          await loginFrame.fill(sel, ALIEXPRESS_MAIL);
+          console.log('[place-order] Email rempli avec:', sel);
+          break;
+        }
+      } catch {}
+    }
     await page.waitForTimeout(800);
 
-    // Remplir mot de passe
-    const passSelector = 'input[name="password"], input[type="password"], #fm-login-password';
-    await page.waitForSelector(passSelector, { timeout: 10000 });
-    await page.fill(passSelector, ALIEXPRESS_PASSWORD);
+    // 5. Remplir mot de passe
+    const passSelectors = ['input[name="password"]', 'input[type="password"]', '#fm-login-password'];
+    for (const sel of passSelectors) {
+      try {
+        const el = await loginFrame.$(sel);
+        if (el) {
+          await loginFrame.fill(sel, ALIEXPRESS_PASSWORD);
+          console.log('[place-order] Password rempli avec:', sel);
+          break;
+        }
+      } catch {}
+    }
     await page.waitForTimeout(800);
 
-    // Cliquer connexion
-    const submitSelector = 'button[type="submit"], .login-submit, #fm-login-submit, button:has-text("Sign in"), button:has-text("Connexion")';
-    await page.click(submitSelector);
-    await page.waitForTimeout(5000);
+    // 6. Cliquer connexion
+    const submitSelectors = [
+      'button[type="submit"]',
+      '.login-submit',
+      '#fm-login-submit',
+      'button:has-text("Sign in")',
+      'button:has-text("Log in")',
+    ];
+    for (const sel of submitSelectors) {
+      try {
+        const el = await loginFrame.$(sel);
+        if (el) {
+          await loginFrame.click(sel);
+          console.log('[place-order] Submit cliqué avec:', sel);
+          break;
+        }
+      } catch {}
+    }
 
+    await page.waitForTimeout(6000);
     console.log('[place-order] URL après login:', page.url());
 
-    // 3. Aller sur la page produit
+    // 7. Aller sur la page produit
     console.log('[place-order] Navigation vers le produit...');
     await page.goto(aliexpress_url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(4000);
 
-    // 4. Sélectionner la quantité si > 1
+    // 8. Sélectionner la quantité si > 1
     if (quantity && quantity > 1) {
       try {
         const qtyInput = await page.$('input[class*="quantity"], input[data-role="quantity"]');
@@ -140,7 +225,7 @@ app.post('/place-order', async (req, res) => {
       }
     }
 
-    // 5. Cliquer sur "Acheter maintenant" / "Buy Now"
+    // 9. Cliquer sur "Buy Now"
     await page.waitForTimeout(2000);
     const buyNowSelectors = [
       'button:has-text("Buy Now")',
@@ -160,7 +245,7 @@ app.post('/place-order', async (req, res) => {
           console.log('[place-order] Buy Now cliqué:', sel);
           break;
         }
-      } catch (e) {}
+      } catch {}
     }
 
     if (!clicked) throw new Error('Bouton Buy Now introuvable');
@@ -168,22 +253,13 @@ app.post('/place-order', async (req, res) => {
     await page.waitForTimeout(5000);
     console.log('[place-order] URL après Buy Now:', page.url());
 
-    // 6. Vérifier si on est sur la page de checkout
+    // 10. Vérifier si on est sur checkout
     const currentUrl = page.url();
     if (!currentUrl.includes('trade') && !currentUrl.includes('order') && !currentUrl.includes('checkout')) {
       throw new Error(`Redirection inattendue: ${currentUrl}`);
     }
 
-    // 7. Vérifier/logger l'adresse de livraison
-    try {
-      const addressField = await page.$('[class*="address"], [class*="shipping"]');
-      if (addressField) {
-        const addressText = await addressField.textContent();
-        console.log('[place-order] Adresse actuelle:', addressText?.substring(0, 100));
-      }
-    } catch (e) {}
-
-    // 8. Confirmer la commande
+    // 11. Confirmer la commande
     await page.waitForTimeout(2000);
     const confirmSelectors = [
       'button:has-text("Place Order")',
@@ -191,7 +267,6 @@ app.post('/place-order', async (req, res) => {
       'button:has-text("Passer la commande")',
       '[class*="place-order"]',
       '[class*="confirm-order"]',
-      'button[type="submit"]:has-text("Order")'
     ];
 
     let confirmed = false;
@@ -204,14 +279,14 @@ app.post('/place-order', async (req, res) => {
           console.log('[place-order] Commande confirmée avec:', sel);
           break;
         }
-      } catch (e) {}
+      } catch {}
     }
 
     await page.waitForTimeout(5000);
     const finalUrl = page.url();
     console.log('[place-order] URL finale:', finalUrl);
 
-    // 9. Extraire l'ID de commande AliExpress
+    // 12. Extraire l'ID de commande
     let aliexpress_order_id = null;
     const orderIdMatch = finalUrl.match(/orderId=(\d+)/) || finalUrl.match(/order\/(\d+)/);
     if (orderIdMatch) aliexpress_order_id = orderIdMatch[1];
@@ -221,7 +296,7 @@ app.post('/place-order', async (req, res) => {
         const pageContent = await page.content();
         const contentMatch = pageContent.match(/"orderId":"?(\d+)"?/);
         if (contentMatch) aliexpress_order_id = contentMatch[1];
-      } catch (e) {}
+      } catch {}
     }
 
     await browser.close();
