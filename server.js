@@ -1,6 +1,6 @@
 import express from 'express';
 import { chromium } from 'playwright';
-import Captcha from 'node-2captcha';
+//import Captcha from 'node-2captcha';
 
 const app = express();
 app.use(express.json());
