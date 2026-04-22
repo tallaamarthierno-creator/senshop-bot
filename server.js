@@ -8,10 +8,11 @@ const API_SECRET = process.env.RAILWAY_API_SECRET;
 
 app.get('/debug-env', (req, res) => {
   res.json({
-    ALIEXPRESS_MAIL: !!process.env.ALI_MAIL,
-    ALIEXPRESS_PASSWORD: !!process.env.ALIEXPRESS_PASSWORD,
-    RAILWAY_API_SECRET: !!process.env.RAILWAY_API_SECRET,
-    MAIL_PREVIEW: (process.env.ALI_MAIL || '').substring(0, 10),
+    ALI_MAIL_set: !!process.env.ALI_MAIL,
+    ALIEXPRESS_MAIL_set: !!process.env.ALIEXPRESS_MAIL,
+    ALIEXPRESS_PASSWORD_set: !!process.env.ALIEXPRESS_PASSWORD,
+    RAILWAY_API_SECRET_set: !!process.env.RAILWAY_API_SECRET,
+    ALI_MAIL_preview: (process.env.ALI_MAIL || process.env.ALIEXPRESS_MAIL || '').substring(0, 15),
     SECRET_PREVIEW: (process.env.RAILWAY_API_SECRET || '').substring(0, 5),
   });
 });
@@ -45,7 +46,6 @@ app.post('/scrape-product', async (req, res) => {
   }
 });
 
-// Helper: trouver le frame avec des inputs
 async function getLoginFrame(page) {
   const frames = page.frames();
   for (const f of frames) {
@@ -64,8 +64,11 @@ app.post('/place-order', async (req, res) => {
     return res.status(400).json({ error: 'aliexpress_url et shipping_address requis' });
   }
 
-  const ALIEXPRESS_MAIL = ali_mail || process.env.ALI_MAIL;
+  // Priorité: body > ALI_MAIL > ALIEXPRESS_MAIL
+  const ALIEXPRESS_MAIL = ali_mail || process.env.ALI_MAIL || process.env.ALIEXPRESS_MAIL;
   const ALIEXPRESS_PASSWORD = ali_password || process.env.ALIEXPRESS_PASSWORD;
+
+  console.log('[place-order] Mail utilisé:', ALIEXPRESS_MAIL?.substring(0, 15));
 
   if (!ALIEXPRESS_MAIL || !ALIEXPRESS_PASSWORD) {
     return res.status(500).json({ error: 'Identifiants AliExpress non configurés' });
@@ -90,93 +93,90 @@ app.post('/place-order', async (req, res) => {
     console.log('[place-order] Navigation vers login...');
     await page.goto('https://login.aliexpress.com/', { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(5000);
-    console.log('[place-order] URL:', page.url());
+    console.log('[place-order] URL initiale:', page.url());
 
     // 2. Trouver le frame avec inputs
     let loginFrame = await getLoginFrame(page);
     if (!loginFrame) throw new Error('Aucun frame avec inputs trouvé');
 
-    // Logger les inputs disponibles
-    const inputsBefore = await loginFrame.$$eval('input', els => els.map(e => ({ type: e.type, name: e.name, id: e.id, placeholder: e.placeholder })));
-    console.log('[place-order] Inputs initiaux:', JSON.stringify(inputsBefore));
+    const inputsInit = await loginFrame.$$eval('input', els => els.map(e => ({ type: e.type, name: e.name, id: e.id, placeholder: e.placeholder })));
+    console.log('[place-order] Inputs initiaux:', JSON.stringify(inputsInit));
 
-    // 3. Remplir l'email (toujours le 1er input)
+    // 3. Remplir l'email
     const inputs = await loginFrame.$$('input');
     await inputs[0].click();
     await inputs[0].fill(ALIEXPRESS_MAIL);
     console.log('[place-order] Email rempli');
     await page.waitForTimeout(500);
+    await inputs[0].press('Enter');
+    await page.waitForTimeout(3000);
 
-    // 4. Appuyer sur Tab ou Enter pour déclencher l'étape suivante
-    await inputs[0].press('Tab');
-    await page.waitForTimeout(2000);
-
-    // Vérifier si un nouveau champ password est apparu
+    // 4. Attendre le champ password
     let allInputsAfter = await loginFrame.$$('input');
-    console.log('[place-order] Inputs après Tab:', allInputsAfter.length);
+    console.log('[place-order] Inputs après Enter:', allInputsAfter.length);
 
-    // Si toujours 1 seul input, essayer Enter
     if (allInputsAfter.length < 2) {
-      await inputs[0].press('Enter');
-      await page.waitForTimeout(3000);
+      // Essayer Tab
+      await inputs[0].press('Tab');
+      await page.waitForTimeout(2000);
       allInputsAfter = await loginFrame.$$('input');
-      console.log('[place-order] Inputs après Enter:', allInputsAfter.length);
-    }
-
-    // Si toujours pas de password, chercher un bouton "Continue" / "Next"
-    if (allInputsAfter.length < 2) {
-      const continueSelectors = [
-        'button:has-text("Continue")',
-        'button:has-text("Next")',
-        'button:has-text("Continuer")',
-        'button[type="submit"]',
-      ];
-      for (const sel of continueSelectors) {
-        try {
-          const btn = await loginFrame.$(sel);
-          if (btn) {
-            await btn.click();
-            console.log('[place-order] Continue cliqué:', sel);
-            await page.waitForTimeout(3000);
-            break;
-          }
-        } catch {}
-      }
-      allInputsAfter = await loginFrame.$$('input');
-      console.log('[place-order] Inputs après Continue:', allInputsAfter.length);
+      console.log('[place-order] Inputs après Tab:', allInputsAfter.length);
     }
 
     // 5. Remplir le password
-    if (allInputsAfter.length >= 2) {
-      // Trouver le champ password (type=password ou le 2ème input)
-      let passwordInput = null;
-      for (const inp of allInputsAfter) {
-        const type = await inp.getAttribute('type');
-        if (type === 'password') { passwordInput = inp; break; }
-      }
-      if (!passwordInput) passwordInput = allInputsAfter[allInputsAfter.length - 1];
-
-      await passwordInput.click();
-      await passwordInput.fill(ALIEXPRESS_PASSWORD);
-      console.log('[place-order] Password rempli');
-      await page.waitForTimeout(500);
-      await passwordInput.press('Enter');
-    } else {
-      // Dernier recours : remplir le seul input visible avec le password et Enter
-      console.log('[place-order] Toujours 1 input — tentative direct password sur input[0]');
-      await allInputsAfter[0].fill(ALIEXPRESS_PASSWORD);
-      await allInputsAfter[0].press('Enter');
+    let passwordInput = null;
+    for (const inp of allInputsAfter) {
+      const type = await inp.getAttribute('type');
+      if (type === 'password') { passwordInput = inp; break; }
+    }
+    if (!passwordInput && allInputsAfter.length >= 2) {
+      passwordInput = allInputsAfter[allInputsAfter.length - 1];
     }
 
-    await page.waitForTimeout(6000);
-    console.log('[place-order] URL après login:', page.url());
+    if (!passwordInput) throw new Error('Champ password introuvable après tentatives');
 
-    // 6. Aller sur la page produit
+    await passwordInput.click();
+    await passwordInput.fill(ALIEXPRESS_PASSWORD);
+    console.log('[place-order] Password rempli');
+    await page.waitForTimeout(500);
+
+    // 6. Cliquer submit
+    const submitSelectors = ['button[type="submit"]', '.login-submit', '#fm-login-submit', 'button:has-text("Sign in")', 'button:has-text("Log in")'];
+    let submitClicked = false;
+    for (const sel of submitSelectors) {
+      try {
+        const btn = await loginFrame.$(sel);
+        if (btn) {
+          await btn.click();
+          submitClicked = true;
+          console.log('[place-order] Submit cliqué:', sel);
+          break;
+        }
+      } catch {}
+    }
+    if (!submitClicked) await passwordInput.press('Enter');
+
+    await page.waitForTimeout(6000);
+    const urlAfterLogin = page.url();
+    console.log('[place-order] URL après login:', urlAfterLogin);
+
+    // 7. Vérifier si le login a réussi
+    if (urlAfterLogin.includes('login') || urlAfterLogin.includes('signin')) {
+      // Vérifier si c'est un CAPTCHA
+      const pageContent = await page.content();
+      const hasCaptcha = pageContent.includes('captcha') || pageContent.includes('CAPTCHA') || pageContent.includes('slider') || pageContent.includes('verify');
+      if (hasCaptcha) {
+        throw new Error('CAPTCHA détecté — login bloqué par AliExpress. Connectez-vous manuellement une fois depuis un navigateur sur cet IP.');
+      }
+      throw new Error(`Login échoué — toujours sur page login. Vérifiez les credentials. URL: ${urlAfterLogin}`);
+    }
+
+    // 8. Aller sur la page produit
     console.log('[place-order] Navigation vers le produit...');
     await page.goto(aliexpress_url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(4000);
 
-    // 7. Quantité
+    // 9. Quantité
     if (quantity && quantity > 1) {
       try {
         const qtyInput = await page.$('input[class*="quantity"], input[data-role="quantity"]');
@@ -189,7 +189,7 @@ app.post('/place-order', async (req, res) => {
       }
     }
 
-    // 8. Buy Now
+    // 10. Buy Now
     await page.waitForTimeout(2000);
     const buyNowSelectors = [
       'button:has-text("Buy Now")',
@@ -217,10 +217,10 @@ app.post('/place-order', async (req, res) => {
 
     const checkoutUrl = page.url();
     if (!checkoutUrl.includes('trade') && !checkoutUrl.includes('order') && !checkoutUrl.includes('checkout')) {
-      throw new Error(`Redirection inattendue: ${checkoutUrl}`);
+      throw new Error(`Redirection inattendue après Buy Now: ${checkoutUrl}`);
     }
 
-    // 9. Confirmer commande
+    // 11. Confirmer commande
     await page.waitForTimeout(2000);
     const confirmSelectors = [
       'button:has-text("Place Order")',
@@ -246,7 +246,7 @@ app.post('/place-order', async (req, res) => {
     const finalUrl = page.url();
     console.log('[place-order] URL finale:', finalUrl);
 
-    // 10. Extraire order ID
+    // 12. Extraire order ID
     let aliexpress_order_id = null;
     const orderIdMatch = finalUrl.match(/orderId=(\d+)/) || finalUrl.match(/order\/(\d+)/);
     if (orderIdMatch) aliexpress_order_id = orderIdMatch[1];
